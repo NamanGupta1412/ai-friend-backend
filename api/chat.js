@@ -1,10 +1,8 @@
 // api/chat.js
-import 'dotenv/config';
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pinecone } = require('@pinecone-database/pinecone');
-const { GoogleGenerativeAIEmbeddings } = require('@langchain/google-genai');
-const { PineconeStore } = require('@langchain/pinecone');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
@@ -13,23 +11,26 @@ app.use(cors());
 
 const pinecone = new Pinecone();
 const pineconeIndex = pinecone.Index('ai-friend-memory');
-const embeddings = new GoogleGenerativeAIEmbeddings({ model: 'text-embedding-004' });
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+const embeddingModel = genAI.getGenerativeModel({ model: 'text-embedding-004' });
 const generativeModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
 app.post('/api/chat', async (req, res) => {
   try {
     const { message } = req.body;
-    const vectorStore = await PineconeStore.fromExistingIndex(embeddings, { pineconeIndex });
-    const results = await vectorStore.similaritySearch(message, 2);
-    const context = results.map(r => r.pageContent).join('\n');
-
-    const prompt = `You are my personal AI friend. Use the following context about me to answer my question.
+    const embeddingResult = await embeddingModel.embedContent(message);
+    const embedding = embeddingResult.embedding.values;
+    const queryResponse = await pineconeIndex.query({
+      topK: 2,
+      vector: embedding,
+      includeMetadata: true,
+    });
+    const context = queryResponse.matches.map((match) => match.metadata.text).join('\n');
+    const prompt = `You are my personal AI friend from Jaipur. Use the following context about me to answer my question.
       Context:
       ${context}
       My Question:
       ${message}`;
-
     const result = await generativeModel.generateContent(prompt);
     const response = await result.response;
     res.json({ response: response.text() });
